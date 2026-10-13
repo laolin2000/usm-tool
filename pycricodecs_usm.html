@@ -1,0 +1,1210 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PyCriCodecsEx.usm &mdash; PyCriCodecsEx  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            PyCriCodecsEx
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <!-- Local TOC -->
+              <div class="local-toc"></div>
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">PyCriCodecsEx</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">PyCriCodecsEx.usm</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for PyCriCodecsEx.usm</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">itertools</span><span class="o">,</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">BinaryIO</span><span class="p">,</span> <span class="n">List</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">io</span><span class="w"> </span><span class="kn">import</span> <span class="n">FileIO</span><span class="p">,</span> <span class="n">BytesIO</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">cached_property</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyCriCodecsEx.chunk</span><span class="w"> </span><span class="kn">import</span> <span class="o">*</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyCriCodecsEx.utf</span><span class="w"> </span><span class="kn">import</span> <span class="n">UTF</span><span class="p">,</span> <span class="n">UTFBuilder</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">ffmpeg</span>
+<span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;ffmpeg-python is required for USM support. Install via PyCriCodecsEx[usm] extra.&quot;</span><span class="p">)</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+
+<span class="c1"># Big thanks and credit for k0lb3 and 9th helping me write this specific code.</span>
+<span class="c1"># Also credit for the original C++ code from Nyagamon/bnnm and https://github.com/donmai-me/WannaCRI/</span>
+
+<div class="viewcode-block" id="USMCrypt">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMCrypt">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">USMCrypt</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;USM related crypto functions&quot;&quot;&quot;</span>
+    <span class="n">videomask1</span><span class="p">:</span> <span class="nb">bytearray</span>
+    <span class="n">videomask2</span><span class="p">:</span> <span class="nb">bytearray</span>
+    <span class="n">audiomask</span><span class="p">:</span> <span class="nb">bytearray</span>
+    <span class="n">usm_key</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">init_key</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">16</span><span class="p">:</span>
+                <span class="n">key</span> <span class="o">=</span> <span class="n">key</span><span class="o">.</span><span class="n">rjust</span><span class="p">(</span><span class="mi">16</span><span class="p">,</span> <span class="s2">&quot;0&quot;</span><span class="p">)</span>
+                <span class="n">key1</span> <span class="o">=</span> <span class="nb">bytes</span><span class="o">.</span><span class="n">fromhex</span><span class="p">(</span><span class="n">key</span><span class="p">[</span><span class="mi">8</span><span class="p">:])</span>
+                <span class="n">key2</span> <span class="o">=</span> <span class="nb">bytes</span><span class="o">.</span><span class="n">fromhex</span><span class="p">(</span><span class="n">key</span><span class="p">[:</span><span class="mi">8</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Invalid input key.&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">type</span><span class="p">(</span><span class="n">key</span><span class="p">)</span> <span class="o">==</span> <span class="nb">int</span><span class="p">:</span>
+            <span class="n">key1</span> <span class="o">=</span> <span class="nb">int</span><span class="o">.</span><span class="n">to_bytes</span><span class="p">(</span><span class="n">key</span> <span class="o">&amp;</span> <span class="mh">0xFFFFFFFF</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">)</span>
+            <span class="n">key2</span> <span class="o">=</span> <span class="nb">int</span><span class="o">.</span><span class="n">to_bytes</span><span class="p">(</span><span class="n">key</span> <span class="o">&gt;&gt;</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Invalid key format, must be either a string or an integer.&quot;</span>
+            <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">usm_key</span> <span class="o">=</span> <span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">key1</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">)</span> <span class="o">|</span> <span class="p">(</span><span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">key2</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="mi">32</span><span class="p">)</span>
+        <span class="n">t</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="mh">0x20</span><span class="p">)</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x00</span><span class="p">:</span><span class="mh">0x09</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">key1</span><span class="p">[</span><span class="mi">3</span><span class="p">],</span>
+            <span class="n">key1</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span>
+            <span class="n">key1</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+            <span class="p">(</span><span class="n">key1</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="mh">0x34</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">key2</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">+</span> <span class="mh">0xF9</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">key2</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0x13</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">key2</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="mh">0x61</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">key1</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">key1</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">+</span> <span class="n">key1</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x09</span><span class="p">:</span><span class="mh">0x0C</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x01</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x07</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x02</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x01</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x0C</span><span class="p">:</span><span class="mh">0x0E</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x0B</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x09</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x08</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x03</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x0E</span><span class="p">:</span><span class="mh">0x10</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x0D</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x0A</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x0B</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x10</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x08</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x0F</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x11</span><span class="p">:</span><span class="mh">0x17</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x10</span><span class="p">]</span> <span class="o">^</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x07</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x0F</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x03</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0x10</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x04</span><span class="p">]</span> <span class="o">-</span> <span class="mh">0x32</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x05</span><span class="p">]</span> <span class="o">+</span> <span class="mh">0xED</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x06</span><span class="p">]</span> <span class="o">^</span> <span class="mh">0xF3</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x17</span><span class="p">:</span><span class="mh">0x1A</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x13</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x0F</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x15</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x07</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="mh">0x21</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x13</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x1A</span><span class="p">:</span><span class="mh">0x1C</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x14</span><span class="p">]</span> <span class="o">^</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x17</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x16</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x16</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x1C</span><span class="p">:</span><span class="mh">0x1F</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x17</span><span class="p">]</span> <span class="o">+</span> <span class="mh">0x44</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x03</span><span class="p">]</span> <span class="o">+</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x04</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+            <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x05</span><span class="p">]</span> <span class="o">-</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x16</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="n">t</span><span class="p">[</span><span class="mh">0x1F</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">t</span><span class="p">[</span><span class="mh">0x1D</span><span class="p">]</span> <span class="o">^</span> <span class="n">t</span><span class="p">[</span><span class="mh">0x13</span><span class="p">])</span> <span class="o">%</span> <span class="mh">0x100</span>
+        <span class="n">t2</span> <span class="o">=</span> <span class="p">[</span><span class="sa">b</span><span class="s2">&quot;U&quot;</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;R&quot;</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;U&quot;</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;C&quot;</span><span class="p">]</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">videomask1</span> <span class="o">=</span> <span class="n">t</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span> <span class="o">^</span> <span class="mh">0xFF</span><span class="p">,</span> <span class="n">t</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">audiomask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="mh">0x20</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mh">0x20</span><span class="p">):</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">x</span> <span class="o">&amp;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">audiomask</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="nb">ord</span><span class="p">(</span><span class="n">t2</span><span class="p">[(</span><span class="n">x</span> <span class="o">&gt;&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">&amp;</span> <span class="mi">3</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">audiomask</span><span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span><span class="p">[</span><span class="n">x</span><span class="p">]</span>
+
+    <span class="c1"># Decrypt SFV chunks or ALP chunks, should only be used if the video data is encrypted.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">VideoMask</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memObj</span><span class="p">:</span> <span class="nb">bytearray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytearray</span><span class="p">:</span>        
+        <span class="n">head</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[:</span><span class="mh">0x40</span><span class="p">]</span>
+        <span class="n">memObj</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[</span><span class="mh">0x40</span><span class="p">:]</span>          
+        <span class="n">size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span>
+        <span class="c1"># memObj len is a cached property, very fast to lookup</span>
+        <span class="k">if</span> <span class="n">size</span> <span class="o">&lt;=</span> <span class="mh">0x200</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">memObj</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span> <span class="o">==</span> <span class="nb">bytearray</span><span class="p">,</span> <span class="s2">&quot;memObj must be a bytearray.&quot;</span>
+        <span class="n">data_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+
+        <span class="c1"># mask 2</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span><span class="p">)</span>
+        <span class="n">mask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+        <span class="n">vmask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span>
+        <span class="n">vmask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">vmask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="n">size</span> <span class="o">//</span> <span class="mi">8</span><span class="p">):</span>
+            <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^=</span> <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+            <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span> <span class="o">=</span> <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^</span> <span class="n">vmask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+        
+        <span class="c1"># mask 1</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">videomask1</span><span class="p">)</span>
+        <span class="n">mask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">32</span><span class="p">):</span>
+            <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span> <span class="o">^=</span> <span class="n">data_view</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">32</span><span class="p">]</span>
+            <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^=</span> <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>                  
+        <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">memObj</span>
+
+    <span class="c1"># Encrypt SFV chunks or ALP chunks, should only be used if the video data needs to be encrypted.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">VideoMaskInv</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memObj</span><span class="p">:</span> <span class="nb">bytearray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytearray</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[:</span><span class="mh">0x40</span><span class="p">]</span>
+        <span class="n">memObj</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[</span><span class="mh">0x40</span><span class="p">:]</span>          
+        <span class="n">size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span>
+        <span class="c1"># memObj len is a cached property, very fast to lookup</span>
+        <span class="k">if</span> <span class="n">size</span> <span class="o">&lt;=</span> <span class="mh">0x200</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">memObj</span>
+        <span class="k">assert</span> <span class="nb">type</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span> <span class="o">==</span> <span class="nb">bytearray</span><span class="p">,</span> <span class="s2">&quot;memObj must be a bytearray.&quot;</span>
+        <span class="n">data_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+
+        <span class="c1"># mask 1</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">videomask1</span><span class="p">)</span>
+        <span class="n">mask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>  
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">32</span><span class="p">):</span>
+            <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span> <span class="o">^=</span> <span class="n">data_view</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">32</span><span class="p">]</span>
+            <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^=</span> <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+
+        <span class="c1"># mask 2</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span><span class="p">)</span>
+        <span class="n">mask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+        <span class="n">vmask</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">videomask2</span>
+        <span class="n">vmask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">vmask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">32</span><span class="p">,</span> <span class="n">size</span> <span class="o">//</span> <span class="mi">8</span><span class="p">):</span>
+            <span class="n">temp</span> <span class="o">=</span> <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^=</span> <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+            <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span> <span class="o">=</span> <span class="n">temp</span> <span class="o">^</span> <span class="n">vmask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">memObj</span>
+    
+    <span class="c1"># Decrypts SFA chunks, should just be used with ADX files.</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">AudioMask</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memObj</span><span class="p">:</span> <span class="nb">bytearray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytearray</span><span class="p">:</span>
+        <span class="n">head</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[:</span><span class="mh">0x140</span><span class="p">]</span>
+        <span class="n">memObj</span> <span class="o">=</span> <span class="n">memObj</span><span class="p">[</span><span class="mh">0x140</span><span class="p">:]</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span>
+        <span class="n">data_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">memObj</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+        <span class="n">mask</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">audiomask</span><span class="p">)</span>
+        <span class="n">mask_view</span> <span class="o">=</span> <span class="nb">memoryview</span><span class="p">(</span><span class="n">mask</span><span class="p">)</span><span class="o">.</span><span class="n">cast</span><span class="p">(</span><span class="s2">&quot;Q&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span> <span class="o">//</span> <span class="mi">8</span><span class="p">):</span>
+            <span class="n">data_view</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">^=</span> <span class="n">mask_view</span><span class="p">[</span><span class="n">i</span> <span class="o">%</span> <span class="mi">4</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">head</span> <span class="o">+</span> <span class="n">memObj</span></div>
+
+
+
+<span class="c1"># There are a lot of unknowns, minbuf(minimum buffer of what?) and avbps(average bitrate per second)</span>
+<span class="c1"># are still unknown how to derive them, at least video wise it is possible, no idea how it&#39;s calculated audio wise nor anything else</span>
+<span class="c1"># seems like it could be random values and the USM would still work.</span>
+<div class="viewcode-block" id="FFmpegCodec">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.FFmpegCodec">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">FFmpegCodec</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Base codec for FFMpeg-based Video streams&quot;&quot;&quot;</span>
+    <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">filesize</span><span class="p">:</span> <span class="nb">int</span>
+
+    <span class="n">info</span><span class="p">:</span> <span class="nb">dict</span>
+    <span class="n">file</span><span class="p">:</span> <span class="n">FileIO</span>
+
+    <span class="n">minchk</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">minbuf</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">avbps</span><span class="p">:</span> <span class="nb">int</span>
+
+<div class="viewcode-block" id="FFmpegCodec.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.FFmpegCodec.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">bytes</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize FFmpegCodec with a media stream, gathering metadata and frame info.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            stream (str | bytes): The media stream to process.</span>
+<span class="sd">        NOTE:</span>
+<span class="sd">            A temp file maybe created for probing only. Which will be deleted after use.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">stream</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tempfile</span> <span class="o">=</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">delete</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tempfile</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">tempfile</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">tempfile</span><span class="o">.</span><span class="n">name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">info</span> <span class="o">=</span> <span class="n">ffmpeg</span><span class="o">.</span><span class="n">probe</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="n">show_entries</span><span class="o">=</span><span class="s2">&quot;packet=dts,pts_time,pos,flags,duration_time&quot;</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span>            
+            <span class="bp">self</span><span class="o">.</span><span class="n">filesize</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">tempfile</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file</span> <span class="o">=</span> <span class="n">BytesIO</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">filesize</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span></div>
+
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">format</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">&quot;format&quot;</span><span class="p">][</span><span class="s2">&quot;format_name&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">stream</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">&quot;streams&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">codec</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[</span><span class="s2">&quot;codec_name&quot;</span><span class="p">]</span>
+    
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">framerate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Running framerate (max frame rate)&quot;&quot;&quot;</span>        
+        <span class="c1"># Lesson learned. Do NOT trust the metadata.</span>
+        <span class="c1"># num, denom = self.stream[&quot;r_frame_rate&quot;].split(&quot;/&quot;)</span>
+        <span class="c1"># return int(int(num) / int(denom))</span>
+        <span class="k">return</span> <span class="mi">1</span> <span class="o">/</span> <span class="nb">min</span><span class="p">((</span><span class="n">dt</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">dt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">()</span> <span class="k">if</span> <span class="n">dt</span><span class="p">))</span>
+
+    <span class="nd">@cached_property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">avg_framerate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Average framerate&quot;&quot;&quot;</span>
+        <span class="c1"># avg_frame_rate = self.stream.get(&quot;avg_frame_rate&quot;, None)</span>
+        <span class="c1"># if avg_frame_rate:</span>
+        <span class="c1">#     num, denom = avg_frame_rate.split(&quot;/&quot;)</span>
+        <span class="c1">#     return int(int(num) / int(denom))</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">frame_count</span> <span class="o">/</span> <span class="nb">sum</span><span class="p">((</span><span class="n">dt</span> <span class="k">for</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">dt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">()</span> <span class="k">if</span> <span class="n">dt</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">packets</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">info</span><span class="p">[</span><span class="s2">&quot;packets&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">width</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[</span><span class="s2">&quot;width&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">height</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="p">[</span><span class="s2">&quot;height&quot;</span><span class="p">]</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">frame_count</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">packets</span><span class="p">)</span>
+
+<div class="viewcode-block" id="FFmpegCodec.frames">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.FFmpegCodec.frames">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">frames</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generator of [frame data, frame dict, is keyframe, duration]&quot;&quot;&quot;</span>
+        <span class="n">offsets</span> <span class="o">=</span> <span class="p">[</span><span class="nb">int</span><span class="p">(</span><span class="n">packet</span><span class="p">[</span><span class="s2">&quot;pos&quot;</span><span class="p">])</span> <span class="k">for</span> <span class="n">packet</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">packets</span><span class="p">]</span> <span class="o">+</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">filesize</span><span class="p">]</span>
+        <span class="n">offsets</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span> <span class="c1"># Includes the metadata packet as well</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">frame</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">packets</span><span class="p">):</span>            
+            <span class="n">frame_size</span> <span class="o">=</span> <span class="n">offsets</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">offsets</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">offsets</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>
+            <span class="n">raw_frame</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">frame_size</span><span class="p">)</span>            
+            <span class="k">assert</span> <span class="s1">&#39;duration_time&#39;</span> <span class="ow">in</span> <span class="n">frame</span><span class="p">,</span> <span class="s2">&quot;Frame duration missing. Consider re-encoding?&quot;</span>
+            <span class="k">yield</span> <span class="n">raw_frame</span><span class="p">,</span> <span class="n">frame</span><span class="p">,</span> <span class="n">frame</span><span class="p">[</span><span class="s2">&quot;flags&quot;</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="s2">&quot;K&quot;</span><span class="p">,</span> <span class="nb">float</span><span class="p">(</span><span class="n">frame</span><span class="p">[</span><span class="s2">&quot;duration_time&quot;</span><span class="p">])</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">generate_SFV</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">builder</span><span class="p">:</span> <span class="s2">&quot;USMBuilder&quot;</span><span class="p">):</span>        
+        <span class="n">v_framerate</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">framerate</span><span class="p">)</span>
+        <span class="n">current_interval</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">SFV_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">SFV_chunk</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&quot;</span>
+        <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">minchk</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">minbuf</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="n">bitrate</span> <span class="o">=</span> <span class="mi">0</span>
+        <span class="k">for</span> <span class="n">data</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">is_keyframe</span><span class="p">,</span> <span class="n">dt</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">frames</span><span class="p">():</span>
+            <span class="c1"># SFV has priority in chunks, it comes first.</span>
+            <span class="n">datalen</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+            <span class="n">padlen</span> <span class="o">=</span> <span class="mh">0x20</span> <span class="o">-</span> <span class="p">(</span><span class="n">datalen</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span> <span class="k">if</span> <span class="n">datalen</span> <span class="o">%</span> <span class="mh">0x20</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">SFV_chunk</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                <span class="n">datalen</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padlen</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mh">0x18</span><span class="p">,</span>
+                <span class="n">padlen</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="nb">int</span><span class="p">(</span><span class="n">current_interval</span><span class="p">),</span>
+                <span class="n">v_framerate</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">data</span> <span class="o">+=</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="o">*</span> <span class="n">padlen</span>
+            <span class="k">if</span> <span class="n">builder</span><span class="o">.</span><span class="n">encrypt</span><span class="p">:</span>
+                <span class="n">data</span> <span class="o">=</span> <span class="n">builder</span><span class="o">.</span><span class="n">VideoMaskInv</span><span class="p">(</span><span class="nb">bytearray</span><span class="p">(</span><span class="n">data</span><span class="p">))</span>
+            <span class="n">SFV_chunk</span> <span class="o">+=</span> <span class="n">data</span>
+            <span class="n">SFV_chunk</span> <span class="o">=</span> <span class="n">SFV_chunk</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="n">datalen</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padlen</span> <span class="o">+</span> <span class="mh">0x8</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="n">SFV_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">SFV_chunk</span><span class="p">)</span>
+            <span class="n">count</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">current_interval</span> <span class="o">+=</span> <span class="mi">2997</span> <span class="o">*</span> <span class="n">dt</span> <span class="c1"># 29.97 as base</span>
+            <span class="k">if</span> <span class="n">is_keyframe</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">minchk</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">minbuf</span> <span class="o">&lt;</span> <span class="n">datalen</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">minbuf</span> <span class="o">=</span> <span class="n">datalen</span>
+            <span class="n">bitrate</span> <span class="o">+=</span> <span class="n">datalen</span> <span class="o">*</span> <span class="mi">8</span> <span class="o">*</span> <span class="n">v_framerate</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">avbps</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">bitrate</span> <span class="o">/</span> <span class="n">count</span><span class="p">)</span>
+            <span class="n">SFV_chunk</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="mh">0x38</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mh">0x18</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">30</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span>
+            <span class="p">)</span>
+            <span class="n">SFV_chunk</span> <span class="o">+=</span> <span class="sa">b</span><span class="s2">&quot;#CONTENTS END   ===============</span><span class="se">\x00</span><span class="s2">&quot;</span>
+            <span class="n">SFV_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">SFV_chunk</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">SFV_list</span>
+
+<div class="viewcode-block" id="FFmpegCodec.save">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.FFmpegCodec.save">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&#39;&#39;&#39;Saves the underlying video stream to a file.&#39;&#39;&#39;</span>
+        <span class="n">tell</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">shutil</span><span class="o">.</span><span class="n">copyfileobj</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="p">,</span> <span class="nb">open</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="s1">&#39;wb&#39;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">file</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">tell</span><span class="p">)</span></div>
+</div>
+
+
+<div class="viewcode-block" id="VP9Codec">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.VP9Codec">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">VP9Codec</span><span class="p">(</span><span class="n">FFmpegCodec</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;VP9 Video stream codec.</span>
+<span class="sd">    </span>
+<span class="sd">    Only streams with `.ivf` containers are supported.&quot;&quot;&quot;</span>
+    <span class="n">MPEG_CODEC</span> <span class="o">=</span> <span class="mi">9</span>
+    <span class="n">MPEG_DCPREC</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="n">VERSION</span> <span class="o">=</span> <span class="mi">16777984</span>
+
+<div class="viewcode-block" id="VP9Codec.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.VP9Codec.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">bytes</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">format</span> <span class="o">==</span> <span class="s2">&quot;ivf&quot;</span><span class="p">,</span> <span class="s2">&quot;must be ivf format.&quot;</span></div>
+</div>
+
+<div class="viewcode-block" id="H264Codec">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.H264Codec">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">H264Codec</span><span class="p">(</span><span class="n">FFmpegCodec</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;H264 Video stream codec.</span>
+
+<span class="sd">    Only streams with `.h264` containers are supported.&quot;&quot;&quot;</span>
+    <span class="n">MPEG_CODEC</span> <span class="o">=</span> <span class="mi">5</span>
+    <span class="n">MPEG_DCPREC</span> <span class="o">=</span> <span class="mi">11</span>
+    <span class="n">VERSION</span> <span class="o">=</span> <span class="mi">0</span>
+
+<div class="viewcode-block" id="H264Codec.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.H264Codec.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">bytes</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">filename</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">format</span> <span class="o">==</span> <span class="s2">&quot;h264&quot;</span>
+        <span class="p">),</span> <span class="s2">&quot;must be raw h264 data. transcode with &#39;.h264&#39; suffix as output&quot;</span></div>
+</div>
+
+<div class="viewcode-block" id="MPEG1Codec">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.MPEG1Codec">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">MPEG1Codec</span><span class="p">(</span><span class="n">FFmpegCodec</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;MPEG1 Video stream codec.</span>
+
+<span class="sd">    Only streams with `.mpeg1` containers are supported.&quot;&quot;&quot;</span>
+    <span class="n">MPEG_CODEC</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">MPEG_DCPREC</span> <span class="o">=</span> <span class="mi">11</span>
+    <span class="n">VERSION</span> <span class="o">=</span> <span class="mi">0</span>
+
+<div class="viewcode-block" id="MPEG1Codec.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.MPEG1Codec.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">stream</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">bytes</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+        <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">format</span> <span class="o">==</span> <span class="s2">&quot;mpegvideo&quot;</span><span class="p">,</span> <span class="s2">&quot;must be m1v format (mpegvideo).&quot;</span></div>
+</div>
+
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyCriCodecsEx.hca</span><span class="w"> </span><span class="kn">import</span> <span class="n">HCACodec</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyCriCodecsEx.adx</span><span class="w"> </span><span class="kn">import</span> <span class="n">ADXCodec</span>
+
+<div class="viewcode-block" id="USM">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USM">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">USM</span><span class="p">(</span><span class="n">USMCrypt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Use this class to extract infromation and data from a USM file.&quot;&quot;&quot;</span>
+
+    <span class="n">filename</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">decrypt</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">stream</span><span class="p">:</span> <span class="n">BinaryIO</span>
+    <span class="n">CRIDObj</span><span class="p">:</span> <span class="n">UTF</span>
+    <span class="n">output</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">bytes</span><span class="p">]</span>
+    <span class="n">size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">demuxed</span><span class="p">:</span> <span class="nb">bool</span>
+
+    <span class="n">audio_codec</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">video_codec</span><span class="p">:</span> <span class="nb">int</span>
+
+    <span class="n">metadata</span><span class="p">:</span> <span class="nb">list</span>
+
+<div class="viewcode-block" id="USM.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USM.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filename</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">BinaryIO</span><span class="p">,</span> <span class="n">key</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Loads a USM file into memory and prepares it for processing.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filename (str): The path to the USM file.</span>
+<span class="sd">            key (str, optional): The USM decryption key. Either int64 or a hex string. Defaults to None.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">filename</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">decrypt</span> <span class="o">=</span> <span class="kc">False</span>
+
+        <span class="k">if</span> <span class="n">key</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">decrypt</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">init_key</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_load_file</span><span class="p">()</span></div>
+
+    
+    <span class="k">def</span><span class="w"> </span><span class="nf">_load_file</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">type</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">)</span> <span class="o">==</span> <span class="nb">str</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stream</span> <span class="o">=</span> <span class="nb">open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">filename</span><span class="p">,</span> <span class="s2">&quot;rb&quot;</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">stream</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">filename</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">size</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="mi">4</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">header</span> <span class="o">!=</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">CRID</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported file type: </span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_demux</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_demux</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Gets data from USM chunks and assignes them to output.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span> <span class="o">=</span> <span class="nb">list</span><span class="p">()</span>
+        <span class="p">(</span>
+            <span class="n">header</span><span class="p">,</span>
+            <span class="n">chuncksize</span><span class="p">,</span>
+            <span class="n">unk08</span><span class="p">,</span>
+            <span class="n">offset</span><span class="p">,</span>
+            <span class="n">padding</span><span class="p">,</span>
+            <span class="n">chno</span><span class="p">,</span>
+            <span class="n">unk0D</span><span class="p">,</span>
+            <span class="n">unk0E</span><span class="p">,</span>
+            <span class="nb">type</span><span class="p">,</span>
+            <span class="n">frametime</span><span class="p">,</span>
+            <span class="n">framerate</span><span class="p">,</span>
+            <span class="n">unk18</span><span class="p">,</span>
+            <span class="n">unk1C</span><span class="p">,</span>
+        <span class="p">)</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">size</span><span class="p">))</span>
+        <span class="n">chuncksize</span> <span class="o">-=</span> <span class="mh">0x18</span>
+        <span class="n">offset</span> <span class="o">-=</span> <span class="mh">0x18</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">CRIDObj</span> <span class="o">=</span> <span class="n">UTF</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">))</span>
+        <span class="n">CRID_payload</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">CRIDObj</span><span class="o">.</span><span class="n">dictarray</span>        
+        <span class="n">headers</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="nb">int</span><span class="o">.</span><span class="n">to_bytes</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;stmid&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="mi">4</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">CRID_payload</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+        <span class="p">]</span>
+        <span class="n">chnos</span> <span class="o">=</span> <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="s2">&quot;chno&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">CRID_payload</span><span class="p">[</span><span class="mi">1</span><span class="p">:]]</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">headers</span><span class="p">)):</span>
+            <span class="n">output</span><span class="p">[</span><span class="n">headers</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;_&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">chnos</span><span class="p">[</span><span class="n">i</span><span class="p">])]</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+        <span class="k">while</span> <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">tell</span><span class="p">()</span> <span class="o">&lt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">size</span><span class="p">:</span>
+            <span class="n">header</span><span class="p">:</span> <span class="nb">bytes</span>
+            <span class="p">(</span>
+                <span class="n">header</span><span class="p">,</span>
+                <span class="n">chuncksize</span><span class="p">,</span>
+                <span class="n">unk08</span><span class="p">,</span>
+                <span class="n">offset</span><span class="p">,</span>
+                <span class="n">padding</span><span class="p">,</span>
+                <span class="n">chno</span><span class="p">,</span>
+                <span class="n">unk0D</span><span class="p">,</span>
+                <span class="n">unk0E</span><span class="p">,</span>
+                <span class="nb">type</span><span class="p">,</span>
+                <span class="n">frametime</span><span class="p">,</span>
+                <span class="n">framerate</span><span class="p">,</span>
+                <span class="n">unk18</span><span class="p">,</span>
+                <span class="n">unk1C</span><span class="p">,</span>
+            <span class="p">)</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">size</span><span class="p">))</span>       
+            <span class="n">chuncksize</span> <span class="o">-=</span> <span class="mh">0x18</span>
+            <span class="n">offset</span> <span class="o">-=</span> <span class="mh">0x18</span>
+            <span class="k">if</span> <span class="n">header</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="ow">in</span> <span class="n">headers</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_reader</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">padding</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+                    <span class="n">output</span><span class="p">[</span><span class="n">header</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="o">+</span> <span class="s2">&quot;_&quot;</span> <span class="o">+</span> <span class="nb">str</span><span class="p">(</span><span class="n">chno</span><span class="p">)]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+                <span class="k">elif</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">or</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                    <span class="n">ChunkObj</span> <span class="o">=</span> <span class="n">UTF</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">))</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ChunkObj</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+                        <span class="k">if</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+                            <span class="n">codec</span> <span class="o">=</span> <span class="n">ChunkObj</span><span class="o">.</span><span class="n">dictarray</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">audio_codec</span> <span class="o">=</span> <span class="n">codec</span><span class="p">[</span><span class="s2">&quot;audio_codec&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>  
+                            <span class="c1"># So far, audio_codec of 2, means ADX, while audio_codec 4 means HCA.</span>
+                        <span class="k">if</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>                            
+                            <span class="bp">self</span><span class="o">.</span><span class="n">video_codec</span> <span class="o">=</span> <span class="n">ChunkObj</span><span class="o">.</span><span class="n">dictarray</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s1">&#39;mpeg_codec&#39;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># It is likely impossible for the code to reach here, since the code right now is suitable</span>
+                <span class="c1"># for any chunk type specified in the CRID header.</span>
+                <span class="c1"># But just incase somehow there&#39;s an extra chunk, this code might handle it.</span>
+                <span class="k">if</span> <span class="n">header</span> <span class="ow">in</span> <span class="p">[</span><span class="n">chunk</span><span class="o">.</span><span class="n">value</span> <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">USMChunckHeaderType</span><span class="p">]:</span>
+                    <span class="k">if</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="n">output</span><span class="p">[</span><span class="n">header</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="o">+</span> <span class="s2">&quot;_0&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">()</span>
+                        <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_reader</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">padding</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span>
+                        <span class="n">output</span><span class="p">[</span><span class="n">header</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span> <span class="o">+</span> <span class="s2">&quot;_0&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+                            <span class="n">data</span>
+                        <span class="p">)</span>  <span class="c1"># No channel number info, code here assumes it&#39;s a one channel data type.</span>
+                    <span class="k">elif</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">or</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+                        <span class="n">ChunkObj</span> <span class="o">=</span> <span class="n">UTF</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">))</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">metadata</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">ChunkObj</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="nb">type</span> <span class="o">==</span> <span class="mi">1</span> <span class="ow">and</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+                            <span class="n">codec</span> <span class="o">=</span> <span class="n">ChunkObj</span><span class="o">.</span><span class="n">dictarray</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+                            <span class="bp">self</span><span class="o">.</span><span class="n">audio_codec</span> <span class="o">=</span> <span class="n">codec</span><span class="p">[</span><span class="s2">&quot;audio_codec&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported chunk type: </span><span class="si">{</span><span class="n">header</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">output</span> <span class="o">=</span> <span class="n">output</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">demuxed</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_reader</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">chuncksize</span><span class="p">,</span> <span class="n">offset</span><span class="p">,</span> <span class="n">padding</span><span class="p">,</span> <span class="n">header</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytearray</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Chunks reader function, reads all data in a chunk and returns a bytearray.&quot;&quot;&quot;</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="nb">bytearray</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">stream</span><span class="o">.</span><span class="n">read</span><span class="p">(</span><span class="n">chuncksize</span><span class="p">)[</span><span class="n">offset</span><span class="p">:])</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span>
+            <span class="ow">or</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">ALP</span><span class="o">.</span><span class="n">value</span>
+        <span class="p">):</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">VideoMask</span><span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">decrypt</span> <span class="k">else</span> <span class="n">data</span>
+        <span class="k">elif</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">AudioMask</span><span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">audio_codec</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">decrypt</span><span class="p">)</span> <span class="k">else</span> <span class="n">data</span>
+        <span class="k">if</span> <span class="n">padding</span><span class="p">:</span>
+            <span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">[:</span><span class="o">-</span><span class="n">padding</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">data</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">streams</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generator of Tuple[Stream Type (&quot;@SFV&quot;, &quot;@SFA&quot;), File name, Raw stream data]&quot;&quot;&quot;</span>
+        <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">CRIDObj</span><span class="o">.</span><span class="n">dictarray</span><span class="p">[</span><span class="mi">1</span><span class="p">:]:</span>
+            <span class="n">filename</span><span class="p">,</span> <span class="n">stmid</span><span class="p">,</span> <span class="n">chno</span> <span class="o">=</span> <span class="n">stream</span><span class="p">[</span><span class="s2">&quot;filename&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">stream</span><span class="p">[</span><span class="s2">&quot;stmid&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">],</span> <span class="n">stream</span><span class="p">[</span><span class="s2">&quot;chno&quot;</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">stmid</span> <span class="o">=</span> <span class="nb">int</span><span class="o">.</span><span class="n">to_bytes</span><span class="p">(</span><span class="n">stmid</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="s1">&#39;big&#39;</span><span class="p">,</span> <span class="n">signed</span><span class="o">=</span><span class="s1">&#39;False&#39;</span><span class="p">)</span>
+            <span class="k">yield</span> <span class="n">stmid</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">filename</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">output</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">stmid</span><span class="o">.</span><span class="n">decode</span><span class="p">()</span><span class="si">}</span><span class="s1">_</span><span class="si">{</span><span class="n">chno</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+    
+<div class="viewcode-block" id="USM.get_video">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USM.get_video">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_video</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">VP9Codec</span> <span class="o">|</span> <span class="n">H264Codec</span> <span class="o">|</span> <span class="n">MPEG1Codec</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a video codec from the available streams.</span>
+
+<span class="sd">        NOTE: A temporary file may be created with this process to determine the stream information.&quot;&quot;&quot;</span>
+        <span class="n">stype</span><span class="p">,</span> <span class="n">sfname</span><span class="p">,</span> <span class="n">sraw</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="nb">filter</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">streams</span><span class="p">),</span> <span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">))</span>
+        <span class="n">stream</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="k">match</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_codec</span><span class="p">:</span>
+            <span class="k">case</span> <span class="n">MPEG1Codec</span><span class="o">.</span><span class="n">MPEG_CODEC</span><span class="p">:</span>
+                <span class="n">stream</span> <span class="o">=</span> <span class="n">MPEG1Codec</span><span class="p">(</span><span class="n">sraw</span><span class="p">)</span>
+            <span class="k">case</span> <span class="n">H264Codec</span><span class="o">.</span><span class="n">MPEG_CODEC</span><span class="p">:</span>
+                <span class="n">stream</span> <span class="o">=</span> <span class="n">H264Codec</span><span class="p">(</span><span class="n">sraw</span><span class="p">)</span>
+            <span class="k">case</span> <span class="n">VP9Codec</span><span class="o">.</span><span class="n">MPEG_CODEC</span><span class="p">:</span>
+                <span class="n">stream</span> <span class="o">=</span> <span class="n">VP9Codec</span><span class="p">(</span><span class="n">sraw</span><span class="p">)</span>
+            <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported video codec: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">video_codec</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">stream</span><span class="o">.</span><span class="n">filename</span> <span class="o">=</span> <span class="n">sfname</span>
+        <span class="k">return</span> <span class="n">stream</span></div>
+
+
+<div class="viewcode-block" id="USM.get_audios">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USM.get_audios">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_audios</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">hca_key</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="n">hca_subkey</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">ADXCodec</span> <span class="o">|</span> <span class="n">HCACodec</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create a list of audio codecs from the available streams.</span>
+<span class="sd">        </span>
+<span class="sd">        Args:</span>
+<span class="sd">            hca_key (int, optional): The HCA decryption key. Either int64 or a hex string. Defaults to -1, in which</span>
+<span class="sd">                                     case the key for USM (if used) would also be used for HCA decryption.</span>
+<span class="sd">            hca_subkey (int, optional): The HCA decryption subkey. Either int64 or a hex string. Defaults to 0.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">match</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_codec</span><span class="p">:</span>
+            <span class="k">case</span> <span class="n">ADXCodec</span><span class="o">.</span><span class="n">AUDIO_CODEC</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">ADXCodec</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">streams</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">]</span>
+            <span class="k">case</span> <span class="n">HCACodec</span><span class="o">.</span><span class="n">AUDIO_CODEC</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[</span><span class="n">HCACodec</span><span class="p">(</span><span class="n">s</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">s</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">key</span><span class="o">=</span><span class="n">hca_key</span> <span class="k">if</span> <span class="n">hca_key</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">usm_key</span><span class="p">,</span> <span class="n">subkey</span><span class="o">=</span><span class="n">hca_subkey</span><span class="p">)</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">streams</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">]</span> <span class="c1"># HCAs are never encrypted in USM</span>
+            <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+                <span class="k">return</span> <span class="p">[]</span></div>
+</div>
+
+
+<div class="viewcode-block" id="USMBuilder">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">USMBuilder</span><span class="p">(</span><span class="n">USMCrypt</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Use this class to build USM files.&quot;&quot;&quot;</span>
+    <span class="n">video_stream</span><span class="p">:</span> <span class="n">VP9Codec</span> <span class="o">|</span> <span class="n">H264Codec</span> <span class="o">|</span> <span class="n">MPEG1Codec</span>
+    <span class="n">audio_streams</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">HCACodec</span> <span class="o">|</span> <span class="n">ADXCodec</span><span class="p">]</span>
+
+    <span class="n">key</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">encrypt</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+
+<div class="viewcode-block" id="USMBuilder.__init__">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder.__init__">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">key</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the USMBuilder from set source files.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            key (str | int, optional): The USM encryption key. Either int64 or a hex string. Defaults to None.</span>
+<span class="sd">        </span>
+<span class="sd">        Note:</span>
+<span class="sd">            For USM with key set, HCA audio streams *usually* use the same key for encryption.</span>
+<span class="sd">            Thus when adding HCA audio streams, make sure your HCACodec is initialized with a key itself.</span>
+
+<span class="sd">            For ADXCodec, this will be ALWAYS encrypted if the USMBuilder is initialized with a key. No</span>
+<span class="sd">            further configuration is needed.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">key</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">init_key</span><span class="p">(</span><span class="n">key</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">encrypt</span> <span class="o">=</span> <span class="kc">True</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span> <span class="o">=</span> <span class="p">[]</span></div>
+
+
+<div class="viewcode-block" id="USMBuilder.add_video">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder.add_video">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_video</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">video</span> <span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">H264Codec</span> <span class="o">|</span> <span class="n">VP9Codec</span> <span class="o">|</span> <span class="n">MPEG1Codec</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Sets the video stream from the specified video file.</span>
+
+<span class="sd">        USMs only support one video stream. Consecutive calls to this method will replace the existing video stream.</span>
+
+<span class="sd">        When `video` is str - it will be treated as a file path. The video source format will be used to map accordingly to the ones Sofdec use.</span>
+<span class="sd">            - MPEG1 (with M1V container): MPEG1 Codec (Sofdec Prime)</span>
+<span class="sd">            - H264 (with H264 container): H264 Codec</span>
+<span class="sd">            - VP9 (with IVF container): VP9 Codec</span>
+<span class="sd">            </span>
+<span class="sd">        Args:</span>
+<span class="sd">            video (str | FFmpegCodec): The path to the video file or an FFmpegCodec instance.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">video</span><span class="p">,</span> <span class="nb">str</span><span class="p">):</span>
+            <span class="n">temp_stream</span> <span class="o">=</span> <span class="n">FFmpegCodec</span><span class="p">(</span><span class="n">video</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span> <span class="o">=</span> <span class="kc">None</span>
+            <span class="k">match</span> <span class="n">temp_stream</span><span class="o">.</span><span class="n">stream</span><span class="p">[</span><span class="s2">&quot;codec_name&quot;</span><span class="p">]:</span>
+                <span class="k">case</span> <span class="s2">&quot;h264&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span> <span class="o">=</span> <span class="n">H264Codec</span><span class="p">(</span><span class="n">video</span><span class="p">)</span>
+                <span class="k">case</span> <span class="s2">&quot;vp9&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span> <span class="o">=</span> <span class="n">VP9Codec</span><span class="p">(</span><span class="n">video</span><span class="p">)</span>
+                <span class="k">case</span> <span class="s2">&quot;mpeg1video&quot;</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span> <span class="o">=</span> <span class="n">MPEG1Codec</span><span class="p">(</span><span class="n">video</span><span class="p">)</span>
+            <span class="k">assert</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="p">,</span> <span class="p">(</span>
+                <span class="s2">&quot;fail to match suitable video codec. Codec=</span><span class="si">%s</span><span class="s2">&quot;</span>
+                <span class="o">%</span> <span class="n">temp_stream</span><span class="o">.</span><span class="n">stream</span><span class="p">[</span><span class="s2">&quot;codec_name&quot;</span><span class="p">]</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span> <span class="o">=</span> <span class="n">video</span></div>
+
+
+<div class="viewcode-block" id="USMBuilder.add_audio">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder.add_audio">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">add_audio</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">audio</span> <span class="p">:</span> <span class="n">ADXCodec</span> <span class="o">|</span> <span class="n">HCACodec</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Append the audio stream(s) from the specified audio file(s).</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            audio (ADXCodec | HCACodec): The path(s) to the audio file(s).</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">audio</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="USMBuilder.build">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder.build">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Build the USM payload&quot;&quot;&quot;</span>
+        <span class="n">SFV_list</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">generate_SFV</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">SFA_chunks</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span><span class="o">.</span><span class="n">generate_SFA</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="bp">self</span><span class="p">)</span> <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">s</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">)</span> <span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">SFA_chunks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">SBT_chunks</span> <span class="o">=</span> <span class="p">[]</span>  <span class="c1"># TODO: Subtitles</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_build_header</span><span class="p">(</span><span class="n">SFV_list</span><span class="p">,</span> <span class="n">SFA_chunks</span><span class="p">,</span> <span class="n">SBT_chunks</span><span class="p">)</span>
+        <span class="n">chunks</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">itertools</span><span class="o">.</span><span class="n">chain</span><span class="p">(</span><span class="n">SFV_list</span><span class="p">,</span> <span class="o">*</span><span class="n">SFA_chunks</span><span class="p">))</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">chunk_key_sort</span><span class="p">(</span><span class="n">chunk</span><span class="p">):</span>
+            <span class="p">(</span>
+                <span class="n">header</span><span class="p">,</span>
+                <span class="n">chuncksize</span><span class="p">,</span>
+                <span class="n">unk08</span><span class="p">,</span>
+                <span class="n">offset</span><span class="p">,</span>
+                <span class="n">padding</span><span class="p">,</span>
+                <span class="n">chno</span><span class="p">,</span>
+                <span class="n">unk0D</span><span class="p">,</span>
+                <span class="n">unk0E</span><span class="p">,</span>
+                <span class="nb">type</span><span class="p">,</span>
+                <span class="n">frametime</span><span class="p">,</span>
+                <span class="n">framerate</span><span class="p">,</span>
+                <span class="n">unk18</span><span class="p">,</span>
+                <span class="n">unk1C</span><span class="p">,</span>
+            <span class="p">)</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">chunk</span><span class="p">[:</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">size</span><span class="p">])</span>
+            <span class="n">prio</span> <span class="o">=</span> <span class="mi">0</span> <span class="k">if</span> <span class="n">header</span> <span class="o">==</span> <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span> <span class="k">else</span> <span class="mi">1</span>
+            <span class="c1"># all stream chunks before section_end chunks, then sort by frametime, with SFV chunks before SFA chunks</span>
+            <span class="k">return</span> <span class="p">(</span><span class="nb">type</span><span class="p">,</span> <span class="n">frametime</span><span class="p">,</span> <span class="n">prio</span><span class="p">)</span>
+
+        <span class="n">chunks</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="n">chunk_key_sort</span><span class="p">)</span>        
+        <span class="bp">self</span><span class="o">.</span><span class="n">usm</span> <span class="o">=</span> <span class="n">header</span>
+        <span class="n">chunks</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">chunks</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">usm</span> <span class="o">+=</span> <span class="n">chunks</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">usm</span></div>
+
+
+<div class="viewcode-block" id="USMBuilder.save">
+<a class="viewcode-back" href="../../index.html#PyCriCodecsEx.usm.USMBuilder.save">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">save</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">filepath</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Saves the built USM to a file.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            filepath (str): The path to save the USM file to.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">filepath</span><span class="p">,</span> <span class="s2">&quot;wb&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">build</span><span class="p">())</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_build_header</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">SFV_list</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">SFA_chunks</span><span class="p">:</span> <span class="nb">list</span><span class="p">,</span> <span class="n">SBT_chunks</span><span class="p">:</span> <span class="nb">list</span>  <span class="c1"># TODO: Not used</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bytes</span><span class="p">:</span>
+        <span class="c1"># Main USM file</span>
+        <span class="n">CRIUSF_DIR_STREAM</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="nb">dict</span><span class="p">(</span>
+                <span class="n">fmtver</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">VERSION</span><span class="p">),</span>
+                <span class="n">filename</span><span class="o">=</span><span class="p">(</span>
+                    <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">string</span><span class="p">,</span>
+                    <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">filename</span><span class="p">))[</span><span class="mi">0</span><span class="p">]</span>
+                    <span class="o">+</span> <span class="s2">&quot;.usm&quot;</span><span class="p">,</span>
+                <span class="p">),</span>
+                <span class="n">filesize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>  <span class="c1"># Will be updated later.</span>
+                <span class="n">datasize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                <span class="n">stmid</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                <span class="n">chno</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="mh">0xFFFF</span><span class="p">),</span>
+                <span class="n">minchk</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+                <span class="n">minbuf</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>  <span class="c1"># Will be updated later.</span>
+                <span class="n">avbps</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>  <span class="c1"># Will be updated later.</span>
+            <span class="p">)</span>
+        <span class="p">]</span>
+
+        <span class="n">total_avbps</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">avbps</span>
+        <span class="n">minbuf</span> <span class="o">=</span> <span class="mi">4</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">minbuf</span>
+
+        <span class="n">v_filesize</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">filesize</span>
+
+        <span class="n">video_dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+            <span class="n">fmtver</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">VERSION</span><span class="p">),</span>
+            <span class="n">filename</span><span class="o">=</span><span class="p">(</span>
+                <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">string</span><span class="p">,</span>
+                <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">basename</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">filename</span><span class="p">),</span>
+            <span class="p">),</span>
+            <span class="n">filesize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">v_filesize</span><span class="p">),</span>
+            <span class="n">datasize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">stmid</span><span class="o">=</span><span class="p">(</span>
+                <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                <span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">),</span>
+            <span class="p">),</span>
+            <span class="n">chno</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+            <span class="n">minchk</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">minchk</span><span class="p">),</span>
+            <span class="n">minbuf</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">minbuf</span><span class="p">),</span>
+            <span class="n">avbps</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">avbps</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">video_dict</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">chno</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+                <span class="n">avbps</span> <span class="o">=</span> <span class="n">stream</span><span class="o">.</span><span class="n">avbps</span>
+                <span class="n">total_avbps</span> <span class="o">+=</span> <span class="n">avbps</span>
+                <span class="n">minbuf</span> <span class="o">+=</span> <span class="mi">27860</span>
+                <span class="n">audio_dict</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span>
+                    <span class="n">fmtver</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="n">filename</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">string</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">filename</span><span class="p">),</span>
+                    <span class="n">filesize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">filesize</span><span class="p">),</span>
+                    <span class="n">datasize</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="n">stmid</span><span class="o">=</span><span class="p">(</span>
+                        <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                        <span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">,</span> <span class="s2">&quot;big&quot;</span><span class="p">),</span>
+                    <span class="p">),</span>
+                    <span class="n">chno</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="n">chno</span><span class="p">),</span>
+                    <span class="n">minchk</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ushort</span><span class="p">,</span> <span class="mi">1</span><span class="p">),</span>
+                    <span class="n">minbuf</span><span class="o">=</span><span class="p">(</span>
+                        <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                        <span class="mi">27860</span><span class="p">,</span>
+                    <span class="p">),</span>  <span class="c1"># minbuf is fixed at that for audio.</span>
+                    <span class="n">avbps</span><span class="o">=</span><span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">avbps</span><span class="p">),</span>
+                <span class="p">)</span>
+                <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">audio_dict</span><span class="p">)</span>
+                <span class="n">chno</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">CRIUSF_DIR_STREAM</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;avbps&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">total_avbps</span><span class="p">)</span>
+        <span class="n">CRIUSF_DIR_STREAM</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;minbuf&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+            <span class="n">minbuf</span><span class="p">,</span>
+        <span class="p">)</span>  <span class="c1"># Wrong. TODO Despite being fixed per SFA stream, seems to change internally before summation.</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">gen_video_hdr_info</span><span class="p">(</span><span class="n">metadata_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+            <span class="n">hdr</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;width&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">width</span><span class="p">),</span>
+                    <span class="s2">&quot;height&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">height</span><span class="p">),</span>
+                    <span class="s2">&quot;mat_width&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">width</span><span class="p">),</span>
+                    <span class="s2">&quot;mat_height&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">height</span><span class="p">),</span>
+                    <span class="s2">&quot;disp_width&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">width</span><span class="p">),</span>
+                    <span class="s2">&quot;disp_height&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">height</span><span class="p">),</span>
+                    <span class="s2">&quot;scrn_width&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;mpeg_dcprec&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uchar</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">MPEG_DCPREC</span><span class="p">),</span>
+                    <span class="s2">&quot;mpeg_codec&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uchar</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">MPEG_CODEC</span><span class="p">),</span>
+                    <span class="s2">&quot;alpha_type&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;total_frames&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">frame_count</span><span class="p">),</span>
+                    <span class="s2">&quot;framerate_n&quot;</span><span class="p">:</span> <span class="p">(</span>
+                        <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                        <span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">framerate</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">),</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;framerate_d&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">1000</span><span class="p">),</span>  <span class="c1"># Denominator</span>
+                    <span class="s2">&quot;metadata_count&quot;</span><span class="p">:</span> <span class="p">(</span>
+                        <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                        <span class="mi">1</span><span class="p">,</span>
+                    <span class="p">),</span>  <span class="c1"># Could be 0 and ignore metadata?</span>
+                    <span class="s2">&quot;metadata_size&quot;</span><span class="p">:</span> <span class="p">(</span>
+                        <span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span>
+                        <span class="n">metadata_size</span><span class="p">,</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;ixsize&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">minbuf</span><span class="p">),</span>
+                    <span class="s2">&quot;pre_padding&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;max_picture_size&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;color_space&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;picture_type&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                <span class="p">}</span>
+            <span class="p">]</span>
+            <span class="n">v</span> <span class="o">=</span> <span class="n">UTFBuilder</span><span class="p">(</span><span class="n">hdr</span><span class="p">,</span> <span class="n">table_name</span><span class="o">=</span><span class="s2">&quot;VIDEO_HDRINFO&quot;</span><span class="p">)</span>
+            <span class="n">v</span><span class="o">.</span><span class="n">strings</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&lt;NULL&gt;</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">v</span><span class="o">.</span><span class="n">strings</span>
+            <span class="n">hdr</span> <span class="o">=</span> <span class="n">v</span><span class="o">.</span><span class="n">bytes</span><span class="p">()</span>
+            <span class="n">padding</span> <span class="o">=</span> <span class="mh">0x20</span> <span class="o">-</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">chk</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                <span class="nb">len</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mh">0x18</span><span class="p">,</span>
+                <span class="n">padding</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">1</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">30</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">chk</span> <span class="o">+=</span> <span class="n">hdr</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">hdr</span><span class="p">)</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">chk</span>
+
+        <span class="n">audio_metadata</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">audio_headers</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">chno</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+                <span class="n">metadata</span> <span class="o">=</span> <span class="n">stream</span><span class="o">.</span><span class="n">get_metadata</span><span class="p">()</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">metadata</span><span class="p">:</span>
+                    <span class="k">break</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">padding</span> <span class="o">=</span> <span class="p">(</span>
+                        <span class="mh">0x20</span> <span class="o">-</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span> <span class="o">!=</span> <span class="mi">0</span>
+                        <span class="k">else</span> <span class="mi">0</span>
+                    <span class="p">)</span>
+                    <span class="n">chk</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                        <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                        <span class="nb">len</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="mh">0x18</span><span class="p">,</span>
+                        <span class="n">padding</span><span class="p">,</span>
+                        <span class="n">chno</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="mi">3</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="mi">30</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">,</span>
+                    <span class="p">)</span>
+                    <span class="n">chk</span> <span class="o">+=</span> <span class="n">metadata</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">metadata</span><span class="p">)</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="n">audio_metadata</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chk</span><span class="p">)</span>
+                <span class="n">chno</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="n">chno</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+                <span class="n">AUDIO_HDRINFO</span> <span class="o">=</span> <span class="p">[</span>
+                    <span class="p">{</span>
+                        <span class="s2">&quot;audio_codec&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uchar</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">AUDIO_CODEC</span><span class="p">),</span>
+                        <span class="s2">&quot;sampling_rate&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">sampling_rate</span><span class="p">),</span>
+                        <span class="s2">&quot;total_samples&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">total_samples</span><span class="p">),</span>
+                        <span class="s2">&quot;num_channels&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uchar</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">chnls</span><span class="p">),</span>
+                        <span class="s2">&quot;metadata_count&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">stream</span><span class="o">.</span><span class="n">METADATA_COUNT</span><span class="p">),</span>
+                        <span class="s2">&quot;metadat_size&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">audio_metadata</span><span class="p">[</span><span class="n">chno</span><span class="p">])</span> <span class="k">if</span> <span class="n">audio_metadata</span> <span class="k">else</span> <span class="mi">0</span><span class="p">),</span>
+                        <span class="s2">&quot;ixsize&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">27860</span><span class="p">),</span>
+                        <span class="s2">&quot;ambisonics&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                    <span class="p">}</span>
+                <span class="p">]</span>                
+                <span class="n">p</span> <span class="o">=</span> <span class="n">UTFBuilder</span><span class="p">(</span><span class="n">AUDIO_HDRINFO</span><span class="p">,</span> <span class="n">table_name</span><span class="o">=</span><span class="s2">&quot;AUDIO_HDRINFO&quot;</span><span class="p">)</span>
+                <span class="n">p</span><span class="o">.</span><span class="n">strings</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&lt;NULL&gt;</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">p</span><span class="o">.</span><span class="n">strings</span>
+                <span class="n">header</span> <span class="o">=</span> <span class="n">p</span><span class="o">.</span><span class="n">bytes</span><span class="p">()</span>
+                <span class="n">padding</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="mh">0x20</span> <span class="o">-</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">header</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">header</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+                <span class="p">)</span>
+                <span class="n">chk</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                    <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                    <span class="nb">len</span><span class="p">(</span><span class="n">header</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mh">0x18</span><span class="p">,</span>
+                    <span class="n">padding</span><span class="p">,</span>
+                    <span class="n">chno</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">1</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">30</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">chk</span> <span class="o">+=</span> <span class="n">header</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">header</span><span class="p">)</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="n">audio_headers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chk</span><span class="p">)</span>
+                <span class="n">chno</span> <span class="o">+=</span> <span class="mi">1</span>
+
+        <span class="n">keyframes</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="s2">&quot;pos&quot;</span><span class="p">],</span> <span class="n">i</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">frame</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">is_keyframe</span><span class="p">,</span> <span class="n">duration</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">video_stream</span><span class="o">.</span><span class="n">frames</span><span class="p">())</span>
+            <span class="k">if</span> <span class="n">is_keyframe</span>
+        <span class="p">]</span>
+
+        <span class="k">def</span><span class="w"> </span><span class="nf">comp_seek_info</span><span class="p">(</span><span class="n">first_chk_ofs</span><span class="p">):</span>
+            <span class="n">seek</span> <span class="o">=</span> <span class="p">[</span>
+                <span class="p">{</span>
+                    <span class="s2">&quot;ofs_byte&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">ullong</span><span class="p">,</span> <span class="n">first_chk_ofs</span> <span class="o">+</span> <span class="nb">int</span><span class="p">(</span><span class="n">pos</span><span class="p">)),</span>
+                    <span class="s2">&quot;ofs_frmid&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">int</span><span class="p">,</span> <span class="n">i</span><span class="p">),</span>
+                    <span class="s2">&quot;num_skip&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">short</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                    <span class="s2">&quot;resv&quot;</span><span class="p">:</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">short</span><span class="p">,</span> <span class="mi">0</span><span class="p">),</span>
+                <span class="p">}</span>
+                <span class="k">for</span> <span class="n">pos</span><span class="p">,</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">keyframes</span>
+            <span class="p">]</span>
+            <span class="n">seek</span> <span class="o">=</span> <span class="n">UTFBuilder</span><span class="p">(</span><span class="n">seek</span><span class="p">,</span> <span class="n">table_name</span><span class="o">=</span><span class="s2">&quot;VIDEO_SEEKINFO&quot;</span><span class="p">)</span>
+            <span class="n">seek</span><span class="o">.</span><span class="n">strings</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&lt;NULL&gt;</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">seek</span><span class="o">.</span><span class="n">strings</span>
+            <span class="n">seek</span> <span class="o">=</span> <span class="n">seek</span><span class="o">.</span><span class="n">bytes</span><span class="p">()</span>
+            <span class="n">padding</span> <span class="o">=</span> <span class="mh">0x20</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">seek</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">seek</span><span class="p">)</span> <span class="o">%</span> <span class="mh">0x20</span> <span class="o">!=</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">seekinf</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                <span class="nb">len</span><span class="p">(</span><span class="n">seek</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x18</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mh">0x18</span><span class="p">,</span>
+                <span class="n">padding</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">3</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">30</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+                <span class="mi">0</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">seekinf</span> <span class="o">+=</span> <span class="n">seek</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">seek</span><span class="p">)</span> <span class="o">+</span> <span class="n">padding</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">seekinf</span>
+
+        <span class="n">len_seek</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">comp_seek_info</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span>
+        <span class="n">len_audio_headers</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x40</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">audio_headers</span><span class="p">])</span>
+        <span class="n">len_audio_metadata</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="o">+</span> <span class="mh">0x40</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">audio_metadata</span><span class="p">])</span>
+        <span class="n">first_chk_ofs</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="mh">0x800</span> <span class="c1"># CRID</span>
+            <span class="o">+</span> <span class="mi">512</span> <span class="c1"># VIDEO_HDRINFO</span>
+            <span class="o">+</span> <span class="n">len_seek</span>
+            <span class="o">+</span> <span class="mi">128</span> <span class="c1"># SFV_END * 2</span>
+            <span class="o">+</span> <span class="n">len_audio_headers</span>
+            <span class="o">+</span> <span class="n">len_audio_metadata</span>
+        <span class="p">)</span>
+        <span class="n">VIDEO_SEEKINFO</span> <span class="o">=</span> <span class="n">comp_seek_info</span><span class="p">(</span><span class="n">first_chk_ofs</span><span class="p">)</span>
+        <span class="n">VIDEO_HDRINFO</span> <span class="o">=</span> <span class="n">gen_video_hdr_info</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">VIDEO_SEEKINFO</span><span class="p">))</span>
+
+        <span class="n">total_len</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">([</span><span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">SFV_list</span><span class="p">])</span> <span class="o">+</span> <span class="n">first_chk_ofs</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">sum_len</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="n">stream</span> <span class="ow">in</span> <span class="n">SFA_chunks</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">stream</span><span class="p">:</span>
+                    <span class="n">sum_len</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+            <span class="n">total_len</span> <span class="o">+=</span> <span class="n">sum_len</span>
+
+        <span class="n">CRIUSF_DIR_STREAM</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="s2">&quot;filesize&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">UTFTypeValues</span><span class="o">.</span><span class="n">uint</span><span class="p">,</span> <span class="n">total_len</span><span class="p">)</span>
+        <span class="n">CRIUSF_DIR_STREAM</span> <span class="o">=</span> <span class="n">UTFBuilder</span><span class="p">(</span>
+            <span class="n">CRIUSF_DIR_STREAM</span><span class="p">,</span> <span class="n">table_name</span><span class="o">=</span><span class="s2">&quot;CRIUSF_DIR_STREAM&quot;</span>
+        <span class="p">)</span>
+        <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">strings</span> <span class="o">=</span> <span class="sa">b</span><span class="s2">&quot;&lt;NULL&gt;</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">strings</span>
+        <span class="n">CRIUSF_DIR_STREAM</span> <span class="o">=</span> <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">bytes</span><span class="p">()</span>
+
+        <span class="c1">##############################################</span>
+        <span class="c1"># Parsing everything.</span>
+        <span class="c1">##############################################</span>
+        <span class="n">header</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">()</span>
+        <span class="c1"># CRID</span>
+        <span class="n">padding</span> <span class="o">=</span> <span class="mh">0x800</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">CRIUSF_DIR_STREAM</span><span class="p">)</span>
+        <span class="n">CRID</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+            <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">CRID</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+            <span class="mh">0x800</span> <span class="o">-</span> <span class="mh">0x8</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mh">0x18</span><span class="p">,</span>
+            <span class="n">padding</span> <span class="o">-</span> <span class="mh">0x20</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">1</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">30</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">CRID</span> <span class="o">+=</span> <span class="n">CRIUSF_DIR_STREAM</span><span class="o">.</span><span class="n">ljust</span><span class="p">(</span><span class="mh">0x800</span> <span class="o">-</span> <span class="mh">0x20</span><span class="p">,</span> <span class="sa">b</span><span class="s2">&quot;</span><span class="se">\x00</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">CRID</span>
+
+        <span class="c1"># Header chunks</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">VIDEO_HDRINFO</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">header</span> <span class="o">+=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">audio_headers</span><span class="p">)</span>            
+        <span class="n">SFV_END</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+            <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+            <span class="mh">0x38</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mh">0x18</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mi">2</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">30</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">SFV_END</span> <span class="o">+=</span> <span class="sa">b</span><span class="s2">&quot;#HEADER END     ===============</span><span class="se">\x00</span><span class="s2">&quot;</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">SFV_END</span>
+
+        <span class="n">SFA_chk_END</span>  <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span> <span class="c1"># Maybe reused</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">SFA_chk_END</span>  <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+                <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                    <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                    <span class="mh">0x38</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mh">0x18</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="n">i</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="mi">2</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">30</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                <span class="p">)</span> <span class="o">+</span> <span class="sa">b</span><span class="s2">&quot;#HEADER END     ===============</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">audio_headers</span><span class="p">))</span>
+            <span class="p">])</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">SFA_chk_END</span> <span class="c1"># Ends audio_headers</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">VIDEO_SEEKINFO</span>
+
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">audio_streams</span><span class="p">:</span>
+            <span class="n">header</span> <span class="o">+=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">audio_metadata</span><span class="p">)</span>
+        <span class="n">SFV_END</span> <span class="o">=</span> <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+            <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFV</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+            <span class="mh">0x38</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mh">0x18</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mh">0x0</span><span class="p">,</span>
+            <span class="mi">2</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">30</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+            <span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">SFV_END</span> <span class="o">+=</span> <span class="sa">b</span><span class="s2">&quot;#METADATA END   ===============</span><span class="se">\x00</span><span class="s2">&quot;</span>
+        <span class="n">header</span> <span class="o">+=</span> <span class="n">SFV_END</span>
+
+        <span class="k">if</span> <span class="n">audio_metadata</span><span class="p">:</span>
+            <span class="n">SFA_chk_END</span>  <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span>
+                <span class="n">USMChunkHeader</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span>
+                    <span class="n">USMChunckHeaderType</span><span class="o">.</span><span class="n">SFA</span><span class="o">.</span><span class="n">value</span><span class="p">,</span>
+                    <span class="mh">0x38</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mh">0x18</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="n">i</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="mh">0x0</span><span class="p">,</span>
+                    <span class="mi">2</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">30</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                    <span class="mi">0</span><span class="p">,</span>
+                <span class="p">)</span> <span class="o">+</span> <span class="sa">b</span><span class="s2">&quot;#METADATA END   ===============</span><span class="se">\x00</span><span class="s2">&quot;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">audio_headers</span><span class="p">))</span>
+            <span class="p">])</span>
+            <span class="n">header</span> <span class="o">+=</span> <span class="n">SFA_chk_END</span> <span class="c1"># Ends audio_headers</span>
+
+        <span class="k">return</span> <span class="n">header</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, mos9527.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
